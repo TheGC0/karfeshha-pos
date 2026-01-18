@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useMemo, useState } from "react";
-import { EXTRA_ITEMS, SAUCES, MenuItem } from "@/lib/menu";
+import { BALILA_EXTRA_ITEMS, EXTRA_ITEMS, SAUCES, MenuItem } from "@/lib/menu";
 import { Modal } from "./Modal";
 import { OrderItem } from "@/lib/store";
 
@@ -14,19 +14,23 @@ export function OrderBuilder(props: {
   onAdd: (orderItem: OrderItem) => void;
   onUpdate?: (orderItem: OrderItem) => void;
 }) {
-  const extrasList = useMemo(() => EXTRA_ITEMS, []);
-
   const active = props.item;
-  const hasAddOns = active?.category !== "Drinks";
+  const hasExtras = active?.category !== "Drinks";
+  const hasSauces = hasExtras && active?.id !== "main-balila";
   const isEditing = Boolean(props.initial);
+  const extrasList = useMemo(() => {
+    if (!hasExtras) return [];
+    if (active?.id === "main-balila") return BALILA_EXTRA_ITEMS;
+    return EXTRA_ITEMS;
+  }, [active?.id, hasExtras]);
 
   const [qty, setQty] = useState(() => props.initial?.qty ?? 1);
   const [sauceLevels, setSauceLevels] = useState<Record<string, number>>(() => {
-    if (!hasAddOns || !props.initial) return {};
+    if (!hasSauces || !props.initial) return {};
     return parseSauceLevels(props.initial.sauces);
   });
   const [extraLevels, setExtraLevels] = useState<Record<string, number>>(() => {
-    if (!hasAddOns || !props.initial) return {};
+    if (!hasExtras || !props.initial) return {};
     return parseExtraLevels(props.initial.extras);
   });
   const [note, setNote] = useState(() => props.initial?.note ?? "");
@@ -60,7 +64,7 @@ export function OrderBuilder(props: {
     setSauceLevels((prev) => {
       const next = { ...prev };
       const current = next[s];
-      if (current === undefined) next[s] = 1;
+      if (current === undefined) next[s] = 0;
       else if (current < 1) next[s] = current + 1;
       return next;
     });
@@ -80,7 +84,7 @@ export function OrderBuilder(props: {
     setExtraLevels((prev) => {
       const next = { ...prev };
       const current = next[id];
-      if (current === undefined) next[id] = 1;
+      if (current === undefined) next[id] = 0;
       else if (current < 1) next[id] = current + 1;
       return next;
     });
@@ -123,18 +127,21 @@ export function OrderBuilder(props: {
     "إضافة"
   );
 
+  const modalWidth = hasSauces ? undefined : "min(620px, 100%)";
+
   return (
     <Modal
       open={props.open}
       title={title}
+      maxWidth={modalWidth}
       onClose={() => {
         props.onClose();
         reset();
       }}
     >
       {!active ? null : (
-        <div className={`builder-grid ${hasAddOns ? "builder-grid--addons" : "builder-grid--compact"}`}>
-          {hasAddOns ? (
+        <div className={`builder-grid ${hasSauces ? "builder-grid--addons" : "builder-grid--compact"}`}>
+          {hasSauces ? (
             <div className="builder-panel builder-panel--addons">
               <div className="builder-section">
                 <div className="builder-label">الصوصات (مجاني)</div>
@@ -167,7 +174,7 @@ export function OrderBuilder(props: {
             </div>
           ) : null}
 
-          {hasAddOns ? (
+          {hasExtras ? (
             <div className="builder-panel builder-panel--extras">
               <div className="builder-section">
                 <div className="builder-label">إضافات</div>
@@ -179,7 +186,7 @@ export function OrderBuilder(props: {
                       <div key={ex.id} className="sauce-row" data-active={selected}>
                         <button type="button" className="sauce-toggle" onClick={() => toggleExtra(ex.id)}>
                           <span>{ex.name}</span>
-                          <span className="extra-price">{ex.price} SAR</span>
+                          <span className="extra-price">{ex.price > 0 ? `${ex.price} ر.س` : "مجاني"}</span>
                         </button>
                         <div className="sauce-level">
                           <button type="button" className="sauce-btn" onClick={() => decExtra(ex.id)} aria-label="قليل">
@@ -260,15 +267,15 @@ export function OrderBuilder(props: {
               إلغاء
               </button>
 
-              <button
-                onClick={() => {
-                  const orderItem: OrderItem = {
-                    id: active.id,
-                    name: active.name,
+          <button
+              onClick={() => {
+                const orderItem: OrderItem = {
+                  id: active.id,
+                  name: active.name,
                   basePrice: active.price,
                   qty,
-                  sauces: hasAddOns ? serializeSauces(sauceLevels) : [],
-                  extras: hasAddOns
+                  sauces: hasSauces ? serializeSauces(sauceLevels) : [],
+                  extras: hasExtras
                     ? serializeExtras(extraLevels, extrasList)
                     : [],
                   note: note.trim() ? note.trim() : undefined,

@@ -1,24 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { loadOrders, subscribeOrders, updateOrderStatus, Order, OrderStatus } from "@/lib/store";
+
+const DONE_LIMIT = 10;
 
 export default function KitchenPage() {
   const [orders, setOrders] = useState<Order[]>([]);
 
+  const refresh = useCallback(async () => {
+    const data = await loadOrders();
+    setOrders(data);
+  }, []);
+
   useEffect(() => {
     let active = true;
 
-    async function refresh() {
+    async function load() {
       const data = await loadOrders();
       if (!active) return;
       setOrders(data);
     }
 
-    void refresh();
+    void load();
     const unsubscribe = subscribeOrders(() => {
-      void refresh();
+      void load();
     });
 
     return () => {
@@ -30,6 +37,9 @@ export default function KitchenPage() {
   const grouped = useMemo(() => {
     const by: Record<OrderStatus, Order[]> = { NEW: [], PREPARING: [], DONE: [], CANCELLED: [] };
     for (const o of orders) by[o.status].push(o);
+    (Object.keys(by) as OrderStatus[]).forEach((key) => {
+      by[key].sort((a, b) => b.createdAt - a.createdAt);
+    });
     return by;
   }, [orders]);
 
@@ -48,6 +58,9 @@ export default function KitchenPage() {
         <div className="kitchen-title">
           <h2 className="kitchen-heading">المطبخ</h2>
           <Link href="/" className="kitchen-home">الرئيسية</Link>
+          <button type="button" className="kitchen-refresh" onClick={() => void refresh()}>
+            تحديث
+          </button>
         </div>
         <div className="kitchen-summary">
           <div className="summary-chip">إجمالي الطلبات: {totalOrders}</div>
@@ -83,7 +96,7 @@ export default function KitchenPage() {
         </Col>
 
         <Col title="منجز" status="DONE" count={grouped.DONE.length}>
-          {grouped.DONE.map((o) => (
+          {grouped.DONE.slice(0, DONE_LIMIT).map((o) => (
             <OrderCard
               key={o.id}
               order={o}
@@ -106,7 +119,7 @@ function Columns({ children }: { children: React.ReactNode }) {
 
 function Col({ title, status, count, children }: { title: string; status: OrderStatus; count: number; children: React.ReactNode }) {
   return (
-    <section className="kitchen-column" data-status={status}>
+    <section className="kitchen-column" data-status={status} data-empty={count === 0}>
       <div className="kitchen-column-head">
         <div className="kitchen-column-title">{title}</div>
         <div className="kitchen-count">{count}</div>
