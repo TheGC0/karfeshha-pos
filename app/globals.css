@@ -403,6 +403,12 @@ textarea {
   gap: 10px;
 }
 
+.kitchen-heading {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 900;
+}
+
 .kitchen-home {
   font-size: 12px;
   font-weight: 800;
@@ -413,13 +419,27 @@ textarea {
   background: white;
 }
 
-.kitchen-revenue {
+.kitchen-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.summary-chip {
   font-weight: 800;
   border: 1px solid var(--stroke);
   border-radius: 999px;
   padding: 6px 12px;
   background: white;
   box-shadow: var(--shadow-card);
+  font-size: 12px;
+}
+
+.summary-chip--revenue {
+  background: rgba(23, 138, 86, 0.1);
+  border-color: rgba(23, 138, 86, 0.25);
+  color: #0f5a39;
 }
 
 .kitchen-board {
@@ -456,22 +476,24 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
 }
 
 .kitchen-column-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 900;
-  letter-spacing: 0.12em;
-  color: var(--muted);
+  color: var(--text);
 }
 
 .kitchen-count {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 900;
   padding: 4px 10px;
   border-radius: 999px;
-  color: var(--text);
-  background: rgba(0, 0, 0, 0.04);
+  color: var(--col-accent);
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .kitchen-column-body {

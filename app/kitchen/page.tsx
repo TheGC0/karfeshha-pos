@@ -40,50 +40,54 @@ export default function KitchenPage() {
   }
 
   const revenueDone = grouped.DONE.reduce((s, o) => s + o.total, 0);
+  const totalOrders = orders.length;
 
   return (
     <div className="page-enter" style={{ display: "grid", gap: 14 }}>
       <div className="kitchen-header">
         <div className="kitchen-title">
-          <h2 style={{ margin: 0 }}>Kitchen</h2>
+          <h2 className="kitchen-heading">المطبخ</h2>
           <Link href="/" className="kitchen-home">الرئيسية</Link>
         </div>
-        <div className="kitchen-revenue">Revenue (Done): {revenueDone.toFixed(2)} SAR</div>
+        <div className="kitchen-summary">
+          <div className="summary-chip">إجمالي الطلبات: {totalOrders}</div>
+          <div className="summary-chip summary-chip--revenue">إيراد المنجز: {revenueDone.toFixed(2)} ر.س</div>
+        </div>
       </div>
 
       <Columns>
-        <Col title="NEW" status="NEW" count={grouped.NEW.length}>
+        <Col title="جديد" status="NEW" count={grouped.NEW.length}>
           {grouped.NEW.map((o) => (
             <OrderCard
               key={o.id}
               order={o}
               actions={[
-                { label: "Start", onClick: () => setStatus(o.id, "PREPARING") },
-                { label: "Cancel", onClick: () => setStatus(o.id, "CANCELLED") },
+                { label: "بدء التحضير", kind: "start", onClick: () => setStatus(o.id, "PREPARING") },
+                { label: "إلغاء", kind: "cancel", onClick: () => setStatus(o.id, "CANCELLED") },
               ]}
             />
           ))}
         </Col>
 
-        <Col title="PREPARING" status="PREPARING" count={grouped.PREPARING.length}>
+        <Col title="قيد التحضير" status="PREPARING" count={grouped.PREPARING.length}>
           {grouped.PREPARING.map((o) => (
             <OrderCard
               key={o.id}
               order={o}
               actions={[
-                { label: "Done", onClick: () => setStatus(o.id, "DONE") },
-                { label: "Back to New", onClick: () => setStatus(o.id, "NEW") },
+                { label: "تم", kind: "done", onClick: () => setStatus(o.id, "DONE") },
+                { label: "إرجاع للجديد", kind: "back", onClick: () => setStatus(o.id, "NEW") },
               ]}
             />
           ))}
         </Col>
 
-        <Col title="DONE" status="DONE" count={grouped.DONE.length}>
+        <Col title="منجز" status="DONE" count={grouped.DONE.length}>
           {grouped.DONE.map((o) => (
             <OrderCard
               key={o.id}
               order={o}
-              actions={[{ label: "Reopen", onClick: () => setStatus(o.id, "NEW") }]}
+              actions={[{ label: "إعادة فتح", kind: "reopen", onClick: () => setStatus(o.id, "NEW") }]}
             />
           ))}
         </Col>
@@ -114,19 +118,19 @@ function Col({ title, status, count, children }: { title: string; status: OrderS
 
 function OrderCard(props: {
   order: Order;
-  actions: { label: string; onClick: () => void }[];
+  actions: { label: string; kind: "start" | "cancel" | "done" | "back" | "reopen"; onClick: () => void }[];
 }) {
   const o = props.order;
-  const time = new Date(o.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = new Date(o.createdAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
   const itemsCount = o.items.reduce((sum, it) => sum + it.qty, 0);
   const singleAction = props.actions.length === 1;
 
   return (
     <div className="order-card" data-status={o.status}>
       <div className="order-top">
-        <div className="order-code">#{o.id.slice(0, 6)}</div>
+        <div className="order-code">رقم #{o.id.slice(0, 6)}</div>
         <div className="order-time">{time}</div>
-        <div className="order-total">{o.total.toFixed(2)} SAR</div>
+        <div className="order-total">{o.total.toFixed(2)} ر.س</div>
       </div>
 
       <div className="order-meta">
@@ -157,7 +161,7 @@ function OrderCard(props: {
           <button
             key={a.label}
             onClick={a.onClick}
-            className={`order-btn ${actionClass(a.label)}`}
+            className={`order-btn ${actionClass(a.kind)}`}
             style={singleAction ? { gridColumn: "1 / -1" } : undefined}
           >
             {a.label}
@@ -168,9 +172,9 @@ function OrderCard(props: {
   );
 }
 
-function actionClass(label: string) {
-  if (label === "Done") return "order-btn--done";
-  if (label === "Start") return "order-btn--start";
-  if (label === "Cancel") return "order-btn--cancel";
+function actionClass(kind: "start" | "cancel" | "done" | "back" | "reopen") {
+  if (kind === "done") return "order-btn--done";
+  if (kind === "start") return "order-btn--start";
+  if (kind === "cancel") return "order-btn--cancel";
   return "order-btn--ghost";
 }
