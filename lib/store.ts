@@ -1,4 +1,15 @@
-import { supabase, supabaseEnabled } from "./supabase";
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+  Timestamp,
+  updateDoc,
+} from "firebase/firestore";
+import { firebaseEnabled, firestore } from "./firebase";
 
 export type OrderItem = {
   id: string;
@@ -7,7 +18,7 @@ export type OrderItem = {
   qty: number;
   sauces: string[];
   extras: { id: string; name: string; price: number; qty: number }[];
-  note?: string;
+  note?: string | null;
 };
 
 export type Discount =
@@ -17,10 +28,14 @@ export type Discount =
 
 export type OrderStatus = "NEW" | "PREPARING" | "DONE" | "CANCELLED";
 
+export type OrderSource = "car" | "walkup";
+
 export type Order = {
   id: string;
   createdAt: number;
   status: OrderStatus;
+  source: OrderSource;
+  carTag?: string;
   items: OrderItem[];
   discount: Discount;
   subtotal: number;
@@ -79,14 +94,15 @@ function localSubscribeOrders(onChange: () => void) {
   };
 }
 
-function canUseSupabase() {
-  return Boolean(typeof window !== "undefined" && supabaseEnabled && supabase);
+function canUseFirebase() {
+  return Boolean(typeof window !== "undefined" && firebaseEnabled && firestore);
 }
 
 type OrderRow = {
-  id: string;
-  created_at: string;
+  created_at?: Timestamp | Date | number | string | null;
   status: OrderStatus;
+  source?: OrderSource;
+  car_tag?: string | null;
   items: OrderItem[];
   discount: Discount;
   subtotal: number | string;
@@ -104,11 +120,44 @@ function toNumber(value: number | string | null | undefined) {
   return 0;
 }
 
-function toOrder(row: OrderRow): Order {
+function toMillis(value: unknown) {
+  if (value instanceof Timestamp) return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : Date.now();
+  }
+  return Date.now();
+}
+
+function normalizeItems(items: OrderItem[]) {
+  return items.map((it) => ({
+    id: it.id,
+    name: it.name,
+    basePrice: it.basePrice,
+    qty: it.qty,
+    sauces: Array.isArray(it.sauces) ? it.sauces : [],
+    extras: Array.isArray(it.extras)
+      ? it.extras.map((e) => ({
+          id: e.id,
+          name: e.name,
+          price: e.price,
+          qty: e.qty,
+        }))
+      : [],
+    note: it.note ? it.note : null,
+  }));
+}
+
+function toOrder(id: string, row: OrderRow): Order {
+  const source: OrderSource = row.source ?? "walkup";
   return {
-    id: row.id,
-    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    id,
+    createdAt: toMillis(row.created_at),
     status: row.status,
+    source,
+    carTag: source === "car" ? row.car_tag ?? undefined : undefined,
     items: Array.isArray(row.items) ? row.items : [],
     discount: row.discount ?? { kind: "none" },
     subtotal: toNumber(row.subtotal),
@@ -137,18 +186,18 @@ export function calcOrderTotals(items: OrderItem[], discount: Discount) {
 }
 
 export async function loadOrders(): Promise<Order[]> {
-  if (canUseSupabase()) {
-    const { data, error } = await supabase!
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
+  if (canUseFirebase()) {
+    try {
+      const ordersRef = collection(firestore!, "orders");
+      const q = query(ordersRef, orderBy("created_at", "desc"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((docSnap) =>
+        toOrder(docSnap.id, docSnap.data() as OrderRow)
+      );
+    } catch (error) {
       console.error("Failed to load orders", error);
       return [];
     }
-
-    return (data ?? []).map((row) => toOrder(row as OrderRow));
   }
 
   return localLoadOrders();
@@ -161,34 +210,43 @@ export async function createOrder(input: {
   discountAmount: number;
   total: number;
   note?: string;
+  source?: OrderSource;
+  carTag?: string;
 }): Promise<Order | null> {
-  if (canUseSupabase()) {
-    const { data, error } = await supabase!
-      .from("orders")
-      .insert({
-        status: "NEW",
-        items: input.items,
-        discount: input.discount,
-        subtotal: input.subtotal,
-        discount_amount: input.discountAmount,
-        total: input.total,
-        note: input.note ?? null,
-      })
-      .select("*")
-      .single();
+  if (canUseFirebase()) {
+    const id = createOrderId();
+    const createdAt = Timestamp.now();
+    const normalizedItems = normalizeItems(input.items);
+    const source: OrderSource = input.source ?? "walkup";
+    const carTag = source === "car" ? (input.carTag ? input.carTag : null) : null;
+    const payload: OrderRow = {
+      created_at: createdAt,
+      status: "NEW",
+      source,
+      car_tag: carTag,
+      items: normalizedItems,
+      discount: input.discount,
+      subtotal: input.subtotal,
+      discount_amount: input.discountAmount,
+      total: input.total,
+      note: input.note ? input.note : null,
+    };
 
-    if (error) {
+    try {
+      await setDoc(doc(firestore!, "orders", id), payload);
+      return toOrder(id, payload);
+    } catch (error) {
       console.error("Failed to create order", error);
       return null;
     }
-
-    return data ? toOrder(data as OrderRow) : null;
   }
 
   const order: Order = {
     id: createOrderId(),
     createdAt: Date.now(),
     status: "NEW",
+    source: input.source ?? "walkup",
+    carTag: input.source === "car" ? input.carTag ?? undefined : undefined,
     items: input.items,
     discount: input.discount,
     subtotal: input.subtotal,
@@ -203,13 +261,10 @@ export async function createOrder(input: {
 }
 
 export async function updateOrderStatus(id: string, status: OrderStatus) {
-  if (canUseSupabase()) {
-    const { error } = await supabase!
-      .from("orders")
-      .update({ status })
-      .eq("id", id);
-
-    if (error) {
+  if (canUseFirebase()) {
+    try {
+      await updateDoc(doc(firestore!, "orders", id), { status });
+    } catch (error) {
       console.error("Failed to update order status", error);
     }
 
@@ -222,19 +277,18 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
 }
 
 export function subscribeOrders(onChange: () => void) {
-  if (canUseSupabase()) {
-    const channel = supabase!
-      .channel("orders-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "orders" },
-        () => onChange()
-      )
-      .subscribe();
+  if (canUseFirebase()) {
+    const ordersRef = collection(firestore!, "orders");
+    const q = query(ordersRef, orderBy("created_at", "desc"));
+    const unsubscribe = onSnapshot(
+      q,
+      () => onChange(),
+      (error) => {
+        console.error("Failed to subscribe to orders", error);
+      }
+    );
 
-    return () => {
-      supabase!.removeChannel(channel);
-    };
+    return unsubscribe;
   }
 
   return localSubscribeOrders(onChange);

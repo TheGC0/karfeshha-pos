@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Cairo } from "next/font/google";
 import "./globals.css";
-import { PinGate } from "@/components/PinGate";
+import { FirebaseAnalytics } from "@/components/FirebaseAnalytics";
 
 const cairo = Cairo({
   subsets: ["arabic", "latin"],
@@ -21,9 +21,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ar" dir="rtl">
       <body className={cairo.className}>
-        <PinGate>
-          <div style={{ padding: 16 }}>{children}</div>
-        </PinGate>
+        <FirebaseAnalytics />
+        <div style={{ padding: 16 }}>{children}</div>
       </body>
     </html>
   );

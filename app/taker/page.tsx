@@ -17,6 +17,8 @@ export default function TakerPage() {
   const [discountKind, setDiscountKind] = useState<Discount["kind"]>("none");
   const [discountInput, setDiscountInput] = useState<string>("");
   const [note, setNote] = useState("");
+  const [orderSource, setOrderSource] = useState<"car" | "walkup">("walkup");
+  const [carDigits, setCarDigits] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
 
@@ -31,6 +33,7 @@ export default function TakerPage() {
   }, [discountKind, discountValue]);
 
   const totals = useMemo(() => calcOrderTotals(cart, discount), [cart, discount]);
+  const canSubmit = cart.length > 0 && (orderSource === "walkup" || carDigits.length > 0);
   const menuIndex = useMemo(() => {
     const map = new Map<string, MenuItem>();
     for (const item of [...MAIN_ITEMS, ...DRINKS]) map.set(item.id, item);
@@ -119,6 +122,7 @@ export default function TakerPage() {
 
   async function submitOrder() {
     if (cart.length === 0) return;
+    if (orderSource === "car" && carDigits.length === 0) return;
 
     const { subtotal, discountAmount, total } = calcOrderTotals(cart, discount);
     await createOrder({
@@ -128,6 +132,8 @@ export default function TakerPage() {
       discountAmount,
       total,
       note: note.trim() ? note.trim() : undefined,
+      source: orderSource,
+      carTag: orderSource === "car" ? carDigits : undefined,
     });
 
     // reset
@@ -136,6 +142,8 @@ export default function TakerPage() {
     setDiscountKind("none");
     setDiscountInput("");
     setNote("");
+    setOrderSource("walkup");
+    setCarDigits("");
   }
 
   function setDiscount(kind: Discount["kind"]) {
@@ -243,6 +251,23 @@ export default function TakerPage() {
             />
           ) : null}
 
+          <div style={{ fontWeight: 800 }}>نوع الطلب</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setOrderSource("walkup")} style={chip(orderSource === "walkup")}>مشاة</button>
+            <button onClick={() => setOrderSource("car")} style={chip(orderSource === "car")}>سيارة</button>
+          </div>
+
+          {orderSource === "car" ? (
+            <input
+              type="text"
+              inputMode="numeric"
+              value={carDigits}
+              onChange={(e) => setCarDigits(normalizeDigitsOnly(e.target.value))}
+              placeholder="آخر أرقام اللوحة"
+              style={input}
+            />
+          ) : null}
+
           <div style={{ fontWeight: 800 }}>ملاحظة للطلب</div>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="اختياري..." style={input} />
 
@@ -252,7 +277,7 @@ export default function TakerPage() {
             <Row label="Total" value={`${totals.total.toFixed(2)} SAR`} bold />
           </div>
 
-          <button onClick={submitOrder} style={btnPrimary} disabled={cart.length === 0}>
+          <button onClick={submitOrder} style={btnPrimary} disabled={!canSubmit}>
             إرسال للمطبخ
           </button>
         </div>
@@ -457,6 +482,23 @@ function parseNumericInput(value: string) {
   if (!cleaned) return 0;
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeDigitsOnly(value: string, maxLen = 6) {
+  const arabicIndic = "٠١٢٣٤٥٦٧٨٩";
+  const easternArabicIndic = "۰۱۲۳۴۵۶۷۸۹";
+  return value
+    .split("")
+    .map((ch) => {
+      const aIndex = arabicIndic.indexOf(ch);
+      if (aIndex !== -1) return String(aIndex);
+      const eIndex = easternArabicIndic.indexOf(ch);
+      if (eIndex !== -1) return String(eIndex);
+      return ch;
+    })
+    .join("")
+    .replace(/\D/g, "")
+    .slice(0, maxLen);
 }
 
 function chip(active: boolean): React.CSSProperties {

@@ -148,6 +148,7 @@ function OrderCard(props: {
 
       <div className="order-meta">
         <div>{itemsCount} عنصر</div>
+        <div>{o.source === "car" ? `سيارة: ${o.carTag ?? "—"}` : "مشاة"}</div>
         {o.note ? <div>ملاحظة: {o.note}</div> : null}
       </div>
 
