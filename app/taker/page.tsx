@@ -7,6 +7,16 @@ import { ItemCard } from "@/components/ItemCard";
 import { OrderBuilder } from "@/components/OrderBuilder";
 import { Modal } from "@/components/Modal";
 import { calcOrderTotals, createOrder, loadOrders, subscribeOrders, Discount, OrderItem } from "@/lib/store";
+import {
+  applyMenuPriceOverrides,
+  getAllPriceableItems,
+  getMenuPriceById,
+  MenuPriceOverrides,
+  PRICE_SECTIONS,
+  loadMenuPriceOverrides,
+  saveMenuPriceOverrides,
+  subscribeMenuPriceOverrides,
+} from "@/lib/menu-prices";
 
 export default function TakerPage() {
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -24,6 +34,20 @@ export default function TakerPage() {
 
   const [ordersCount, setOrdersCount] = useState(0);
   const [revenueDone, setRevenueDone] = useState(0);
+  const [priceOverrides, setPriceOverrides] = useState<MenuPriceOverrides>({});
+  const [priceEditorOpen, setPriceEditorOpen] = useState(false);
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
+  const [savingPrices, setSavingPrices] = useState(false);
+  const [priceFormError, setPriceFormError] = useState<string | null>(null);
+
+  const mainItems = useMemo(
+    () => applyMenuPriceOverrides(MAIN_ITEMS, priceOverrides),
+    [priceOverrides]
+  );
+  const drinks = useMemo(
+    () => applyMenuPriceOverrides(DRINKS, priceOverrides),
+    [priceOverrides]
+  );
 
   const discountValue = useMemo(() => parseNumericInput(discountInput), [discountInput]);
 
@@ -36,9 +60,9 @@ export default function TakerPage() {
   const canSubmit = cart.length > 0 && (orderSource === "walkup" || carDigits.length > 0);
   const menuIndex = useMemo(() => {
     const map = new Map<string, MenuItem>();
-    for (const item of [...MAIN_ITEMS, ...DRINKS]) map.set(item.id, item);
+    for (const item of [...mainItems, ...drinks]) map.set(item.id, item);
     return map;
-  }, []);
+  }, [drinks, mainItems]);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +78,26 @@ export default function TakerPage() {
 
     void refresh();
     const unsubscribe = subscribeOrders(() => {
+      void refresh();
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function refresh() {
+      const overrides = await loadMenuPriceOverrides();
+      if (!active) return;
+      setPriceOverrides(overrides);
+    }
+
+    void refresh();
+    const unsubscribe = subscribeMenuPriceOverrides(() => {
       void refresh();
     });
 
@@ -81,15 +125,16 @@ export default function TakerPage() {
     const item = cart[index];
     if (!item) return;
     const fallbackCategory = item.id.startsWith("drink-") ? "Drinks" : "Main";
-    const menuItem =
-      menuIndex.get(item.id) ??
-      ({
-        id: item.id,
-        name: item.name,
-        price: item.basePrice,
-        category: fallbackCategory,
-        img: "/items/placeholder.png",
-      } as MenuItem);
+    const fromMenu = menuIndex.get(item.id);
+    const menuItem = fromMenu
+      ? { ...fromMenu, price: item.basePrice }
+      : ({
+          id: item.id,
+          name: item.name,
+          price: item.basePrice,
+          category: fallbackCategory,
+          img: "/items/placeholder.png",
+        } as MenuItem);
     setActiveItem(menuItem);
     setEditingIndex(index);
     setBuilderOpen(true);
@@ -151,13 +196,59 @@ export default function TakerPage() {
     if (kind === "none") setDiscountInput("");
   }
 
+  function openPriceEditor() {
+    const draft: Record<string, string> = {};
+    for (const item of getAllPriceableItems()) {
+      const resolved = getMenuPriceById(item.id, item.price, priceOverrides);
+      draft[item.id] = String(resolved);
+    }
+    setPriceFormError(null);
+    setPriceDrafts(draft);
+    setPriceEditorOpen(true);
+  }
+
+  function closePriceEditor() {
+    setPriceEditorOpen(false);
+    setSavingPrices(false);
+    setPriceFormError(null);
+  }
+
+  async function submitPriceEditor() {
+    const nextOverrides: MenuPriceOverrides = {};
+
+    for (const item of getAllPriceableItems()) {
+      const raw = (priceDrafts[item.id] ?? "").trim();
+      const parsed = parseStrictPriceInput(raw);
+      if (parsed === null || parsed < 0) {
+        setPriceFormError(`أدخل سعر صالح لـ ${item.name}`);
+        return;
+      }
+
+      const rounded = Math.round(parsed * 100) / 100;
+      if (rounded !== item.price) nextOverrides[item.id] = rounded;
+    }
+
+    setSavingPrices(true);
+    setPriceFormError(null);
+    try {
+      await saveMenuPriceOverrides(nextOverrides);
+      setPriceOverrides(nextOverrides);
+      setPriceEditorOpen(false);
+    } catch (error) {
+      console.error("Failed to save prices", error);
+      setPriceFormError("تعذر حفظ الأسعار. حاول مرة ثانية.");
+    } finally {
+      setSavingPrices(false);
+    }
+  }
+
   return (
     <div className="taker-layout page-enter" style={{ display: "grid", gridTemplateColumns: "1.3fr 0.7fr", gap: 16, alignItems: "start" }}>
       {/* MENU */}
       <div style={{ display: "grid", gap: 16 }}>
         <Section>
           <Grid>
-            {MAIN_ITEMS.map((it) => (
+            {mainItems.map((it) => (
               <ItemCard key={it.id} title={it.name} price={it.price} img={it.img} onClick={() => openBuilder(it)} />
             ))}
           </Grid>
@@ -165,7 +256,7 @@ export default function TakerPage() {
 
         <Section>
           <Grid>
-            {DRINKS.map((it) => (
+            {drinks.map((it) => (
               <ItemCard key={it.id} title={it.name} price={it.price} img={it.img} onClick={() => openBuilder(it)} />
             ))}
           </Grid>
@@ -178,6 +269,10 @@ export default function TakerPage() {
           <div className="cart-title">
             <div>الطلب</div>
             <Link href="/" className="cart-home">الرئيسية</Link>
+            <button onClick={openPriceEditor} style={btnGhostHeader}>
+              <IconEdit />
+              تعديل الأسعار
+            </button>
           </div>
           <div className="cart-meta">
             <span>Orders: {ordersCount}</span>
@@ -292,12 +387,56 @@ export default function TakerPage() {
             setBuilderOpen(false);
             setEditingIndex(null);
           }}
+          priceOverrides={priceOverrides}
           onAdd={addToCart}
           onUpdate={(orderItem) => {
             if (editingIndex === null) return;
             updateCart(editingIndex, orderItem);
           }}
         />
+      ) : null}
+
+      {priceEditorOpen ? (
+        <Modal open={priceEditorOpen} title="تعديل الأسعار" onClose={closePriceEditor} maxWidth="min(760px, 100%)">
+          <div style={{ display: "grid", gap: 14 }}>
+            {PRICE_SECTIONS.map((section) => (
+              <div key={section.key} style={{ display: "grid", gap: 8 }}>
+                <div style={{ fontWeight: 900 }}>{section.label}</div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {section.items.map((item) => (
+                    <div key={item.id} style={priceRow}>
+                      <div style={{ fontWeight: 700 }}>{item.name}</div>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={priceDrafts[item.id] ?? ""}
+                        onChange={(e) =>
+                          setPriceDrafts((prev) => ({
+                            ...prev,
+                            [item.id]: e.target.value,
+                          }))
+                        }
+                        style={priceInput}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {priceFormError ? <div style={{ color: "#9b3b3b", fontWeight: 700 }}>{priceFormError}</div> : null}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button onClick={closePriceEditor} style={btnConfirmGhost} disabled={savingPrices}>
+                إلغاء
+              </button>
+              <button onClick={() => void submitPriceEditor()} style={btnPrimary} disabled={savingPrices}>
+                {savingPrices ? "جاري الحفظ..." : "حفظ الأسعار"}
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       {confirmOpen ? (
@@ -391,6 +530,20 @@ const btnGhostSmall: React.CSSProperties = {
   gap: 6,
 };
 
+const btnGhostHeader: React.CSSProperties = {
+  border: "1px solid #e6e6e6",
+  borderRadius: 999,
+  padding: "6px 10px",
+  background: "white",
+  cursor: "pointer",
+  fontWeight: 800,
+  fontSize: 12,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "flex-start",
+  gap: 8,
+};
+
 const btnTiny: React.CSSProperties = {
   border: "1px solid #e6e6e6",
   borderRadius: 10,
@@ -435,6 +588,23 @@ const btnConfirmDanger: React.CSSProperties = {
   fontWeight: 800,
 };
 
+const priceRow: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 140px",
+  gap: 10,
+  alignItems: "center",
+};
+
+const priceInput: React.CSSProperties = {
+  width: "100%",
+  border: "1px solid #e6e6e6",
+  borderRadius: 10,
+  padding: "8px 10px",
+  outline: "none",
+  textAlign: "center",
+  fontWeight: 700,
+};
+
 function IconPlus() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -472,16 +642,29 @@ function IconTrash() {
 }
 
 function parseNumericInput(value: string) {
+  const cleaned = normalizeNumericInput(value);
+  if (!cleaned) return 0;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseStrictPriceInput(value: string) {
+  const cleaned = normalizeNumericInput(value);
+  if (!cleaned) return null;
+  const dotsCount = (cleaned.match(/\./g) ?? []).length;
+  if (dotsCount > 1) return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeNumericInput(value: string) {
   const arabicIndic = "٠١٢٣٤٥٦٧٨٩";
   const easternArabicIndic = "۰۱۲۳۴۵۶۷۸۹";
   const normalized = value
     .replace(/[٠-٩]/g, (d) => String(arabicIndic.indexOf(d)))
     .replace(/[۰-۹]/g, (d) => String(easternArabicIndic.indexOf(d)))
     .replace(/[٫٬,]/g, ".");
-  const cleaned = normalized.replace(/[^0-9.]/g, "");
-  if (!cleaned) return 0;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return normalized.replace(/[^0-9.]/g, "");
 }
 
 function normalizeDigitsOnly(value: string, maxLen = 6) {

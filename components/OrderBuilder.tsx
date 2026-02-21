@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useMemo, useState } from "react";
 import { BALILA_EXTRA_ITEMS, EXTRA_ITEMS, SAUCES, MenuItem } from "@/lib/menu";
+import { getMenuItemPrice, MenuPriceOverrides } from "@/lib/menu-prices";
 import { Modal } from "./Modal";
 import { OrderItem } from "@/lib/store";
 
@@ -10,6 +11,7 @@ export function OrderBuilder(props: {
   open: boolean;
   item: MenuItem | null;
   initial?: OrderItem | null;
+  priceOverrides?: MenuPriceOverrides;
   onClose: () => void;
   onAdd: (orderItem: OrderItem) => void;
   onUpdate?: (orderItem: OrderItem) => void;
@@ -20,9 +22,12 @@ export function OrderBuilder(props: {
   const isEditing = Boolean(props.initial);
   const extrasList = useMemo(() => {
     if (!hasExtras) return [];
-    if (active?.id === "main-balila") return BALILA_EXTRA_ITEMS;
-    return EXTRA_ITEMS;
-  }, [active?.id, hasExtras]);
+    const source = active?.id === "main-balila" ? BALILA_EXTRA_ITEMS : EXTRA_ITEMS;
+    return source.map((extra) => ({
+      ...extra,
+      price: getMenuItemPrice(extra, props.priceOverrides ?? {}),
+    }));
+  }, [active?.id, hasExtras, props.priceOverrides]);
 
   const [qty, setQty] = useState(() => props.initial?.qty ?? 1);
   const [sauceLevels, setSauceLevels] = useState<Record<string, number>>(() => {
@@ -34,12 +39,21 @@ export function OrderBuilder(props: {
     return parseExtraLevels(props.initial.extras);
   });
   const [note, setNote] = useState(() => props.initial?.note ?? "");
+  const [unitPriceInput, setUnitPriceInput] = useState(() =>
+    formatPriceInput(props.initial?.basePrice ?? active?.price ?? 0)
+  );
+
+  const unitPrice = useMemo(
+    () => parsePriceInput(unitPriceInput, props.initial?.basePrice ?? active?.price ?? 0),
+    [unitPriceInput, props.initial?.basePrice, active?.price]
+  );
 
   function reset() {
     setQty(1);
     setSauceLevels({});
     setExtraLevels({});
     setNote("");
+    setUnitPriceInput(formatPriceInput(active?.price ?? props.initial?.basePrice ?? 0));
   }
 
   function toggleSauce(s: string) {
@@ -206,6 +220,18 @@ export function OrderBuilder(props: {
               </div>
 
               <div className="builder-section">
+                <div className="builder-label">سعر الوحدة (ر.س)</div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={unitPriceInput}
+                  onChange={(e) => setUnitPriceInput(e.target.value)}
+                  placeholder="السعر"
+                  style={input}
+                />
+              </div>
+
+              <div className="builder-section">
                 <div className="builder-label">الكمية</div>
                 <div className="builder-stepper">
                   <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={btnSmall} aria-label="إنقاص">
@@ -230,6 +256,18 @@ export function OrderBuilder(props: {
             </div>
           ) : (
             <div className="builder-panel builder-panel--compact">
+              <div className="builder-section">
+                <div className="builder-label">سعر الوحدة (ر.س)</div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={unitPriceInput}
+                  onChange={(e) => setUnitPriceInput(e.target.value)}
+                  placeholder="السعر"
+                  style={input}
+                />
+              </div>
+
               <div className="builder-section">
                 <div className="builder-label">الكمية</div>
                 <div className="builder-stepper">
@@ -263,28 +301,28 @@ export function OrderBuilder(props: {
                   reset();
                 }}
                 style={btnGhost}
-            >
-              إلغاء
+              >
+                إلغاء
               </button>
 
-          <button
-              onClick={() => {
-                const orderItem: OrderItem = {
-                  id: active.id,
-                  name: active.name,
-                  basePrice: active.price,
-                  qty,
-                  sauces: hasSauces ? serializeSauces(sauceLevels) : [],
-                  extras: hasExtras
-                    ? serializeExtras(extraLevels, extrasList)
-                    : [],
-                  note: note.trim() ? note.trim() : undefined,
-                };
-                if (isEditing && props.onUpdate) props.onUpdate(orderItem);
-                else props.onAdd(orderItem);
-                props.onClose();
-                reset();
-              }}
+              <button
+                onClick={() => {
+                  const orderItem: OrderItem = {
+                    id: active.id,
+                    name: active.name,
+                    basePrice: unitPrice,
+                    qty,
+                    sauces: hasSauces ? serializeSauces(sauceLevels) : [],
+                    extras: hasExtras
+                      ? serializeExtras(extraLevels, extrasList)
+                      : [],
+                    note: note.trim() ? note.trim() : undefined,
+                  };
+                  if (isEditing && props.onUpdate) props.onUpdate(orderItem);
+                  else props.onAdd(orderItem);
+                  props.onClose();
+                  reset();
+                }}
                 style={btnPrimary}
               >
                 {isEditing ? "تحديث الطلب" : "إضافة للطلب"}
@@ -385,7 +423,7 @@ function serializeSauces(levels: Record<string, number>) {
 function parseSauceLevels(sauces: string[]) {
   const levels: Record<string, number> = {};
   for (const entry of sauces) {
-    const match = entry.match(/^(.*?)\\s*\\((.+)\\)$/);
+    const match = entry.match(/^(.*?)\s*\((.+)\)$/);
     if (match) {
       const name = match[1].trim();
       const tag = match[2].trim();
@@ -433,7 +471,7 @@ function parseExtraLevels(extras: { id: string; name: string; qty: number }[]) {
   const levels: Record<string, number> = {};
   for (const entry of extras) {
     let level = entry.qty > 1 ? 1 : 0;
-    const match = entry.name.match(/^(.*?)\\s*\\((.+)\\)$/);
+    const match = entry.name.match(/^(.*?)\s*\((.+)\)$/);
     if (match) {
       const tag = match[2].trim();
       if (tag === "زيادة") level = 1;
@@ -442,4 +480,30 @@ function parseExtraLevels(extras: { id: string; name: string; qty: number }[]) {
     levels[entry.id] = level;
   }
   return levels;
+}
+
+function formatPriceInput(value: number) {
+  return String(Math.max(0, Math.round(value * 100) / 100));
+}
+
+function parsePriceInput(value: string, fallback: number) {
+  if (!value.trim()) return Math.max(0, fallback);
+  const parsed = parseNumericInput(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return Math.max(0, fallback);
+  }
+  return Math.round(parsed * 100) / 100;
+}
+
+function parseNumericInput(value: string) {
+  const arabicIndic = "٠١٢٣٤٥٦٧٨٩";
+  const easternArabicIndic = "۰۱۲۳۴۵۶۷۸۹";
+  const normalized = value
+    .replace(/[٠-٩]/g, (d) => String(arabicIndic.indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String(easternArabicIndic.indexOf(d)))
+    .replace(/[٫٬,]/g, ".");
+  const cleaned = normalized.replace(/[^0-9.]/g, "");
+  if (!cleaned) return 0;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
